@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" monitorInterval="5">
+  <Appenders>
+    <Console name="Console" target="SYSTEM_OUT">
+      <PatternLayout noConsoleNoAnsi="true"
+        pattern="%style{%d}{white} %highlight{%-5level}{TRACE=white} %style{[%t][%logger]}{white} %highlight{%msg%n%throwable}{TRACE=white}" />
+    </Console>
+    <RollingRandomAccessFile name="RollingFile" append="false" fileName="/temp/dv/jdbc.log"
+      filePattern="/temp/dv/archive/$${date:yyyy-MM}/jdbc-%d{yyyy-MM-dd}-%i.log.gz">
+      <PatternLayout>
+        <Pattern>%d %-5level [%t][%logger] %msg%n%throwable</Pattern>
+      </PatternLayout>
+      <Policies>
+        <SizeBasedTriggeringPolicy size="100 MB" />
+      </Policies>
+    </RollingRandomAccessFile>
+  </Appenders>
+  <Loggers>
+    <Root level="TRACE">
+      <!-- <AppenderRef ref="Console" /> -->
+      <AppenderRef ref="RollingFile" />
+    </Root>
+    <Logger name="javax.management" level="INFO" />
+    <Logger name="sun.rmi" level="INFO" />
+    <Logger name="com.rs.dv.util.LoggerEnvironmentReporter" level="OFF" />
+  </Loggers>
+  <!-- Filters -->
+  <Filters>
+    <!-- SQL only -->
+    <!-- <MarkerFilter marker="DV.SQL" onMatch="ACCEPT" onMismatch="DENY" /> <MarkerFilter marker="DV.SQL.QUERY" onMatch="ACCEPT" 
+      onMismatch="DENY" /> <MarkerFilter marker="DV.SQL.UPDATE" onMatch="ACCEPT" onMismatch="DENY" /> -->
+    <!-- No buffer hex dumps -->
+    <MarkerFilter marker="DV.BUFFER" onMatch="DENY" onMismatch="NEUTRAL" />
+  </Filters>
+</Configuration>
