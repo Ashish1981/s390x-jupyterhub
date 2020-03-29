@@ -1,47 +1,98 @@
-ARG BASE_CONTAINER=s390x/ubuntu
+ARG BASE_CONTAINER=buildpack-deps:latest
 FROM $BASE_CONTAINER
 # Define the label for this image
 LABEL maintainer="IBM PoC"
-# Switch to root user for the following steps
-USER root
-# Install all OS dependencies for notebook server that starts but lacks all features
-ENV DEBIAN_FRONTEND noninteractive
-RUN apt-get update && apt-get -yq dist-upgrade \
-    && apt-get install -yq --no-install-recommends \
-    wget \
-    bzip2 \
-    ca-certificates \
-    sudo \
-    locales \
-    git \
-    default-jre \
-    vim \
-    curl \
-    fonts-liberation \
-    run-one
-# Get the installed code-page
-RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
-    locale-gen
-# Configure environment
-ENV SHELL=/bin/bash \
-    LC_ALL=en_US.UTF-8 \
-    LANG=en_US.UTF-8 \
-    LANGUAGE=en_US.UTF-8
-ENV PYTHON_PACKAGE_NAME="python"
-ENV PYTHON_PACKAGE_VERSION="3.7.4"
-#Configure and build and install Python3
-RUN apt-get install -y gcc g++ libbz2-dev libdb-dev libffi-dev libgdbm-dev liblzma-dev libncurses-dev libreadline-dev libsqlite3-dev libssl-dev make tar tk-dev uuid-dev wget xz-utils zlib1g-dev \
-    && wget "https://www.python.org/ftp/${PYTHON_PACKAGE_NAME}/${PYTHON_PACKAGE_VERSION}/Python-${PYTHON_PACKAGE_VERSION}.tgz" \
-    && tar -xzvf "Python-${PYTHON_PACKAGE_VERSION}.tgz" \
-    && rm "Python-${PYTHON_PACKAGE_VERSION}.tgz" \
-    && cd "Python-${PYTHON_PACKAGE_VERSION}" \
-    && ./configure \
-    && make \
-    && make install \
-    && rm -rf /var/lib/apt/lists/*
+
+# http://bugs.python.org/issue19846
+# > At the moment, setting "LANG=C" on a Linux system *fundamentally breaks Python 3*, and that's not OK.
+ENV LANG C.UTF-8
+
+# extra dependencies (over what buildpack-deps already includes)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		libbluetooth-dev \
+		tk-dev \
+		uuid-dev \
+	&& rm -rf /var/lib/apt/lists/*
+
+ENV GPG_KEY E3FF2839C048B25C084DEBE9B26995E310250568
+ENV PYTHON_VERSION 3.8.2
+
+RUN set -ex \
+	\
+	&& wget -O python.tar.xz "https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz" \
+	&& wget -O python.tar.xz.asc "https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz.asc" \
+	&& export GNUPGHOME="$(mktemp -d)" \
+	&& gpg --batch --keyserver ha.pool.sks-keyservers.net --recv-keys "$GPG_KEY" \
+	&& gpg --batch --verify python.tar.xz.asc python.tar.xz \
+	&& { command -v gpgconf > /dev/null && gpgconf --kill all || :; } \
+	&& rm -rf "$GNUPGHOME" python.tar.xz.asc \
+	&& mkdir -p /usr/src/python \
+	&& tar -xJC /usr/src/python --strip-components=1 -f python.tar.xz \
+	&& rm python.tar.xz \
+	\
+	&& cd /usr/src/python \
+	&& gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
+	&& ./configure \
+		--build="$gnuArch" \
+		--enable-loadable-sqlite-extensions \
+		--enable-optimizations \
+		--enable-option-checking=fatal \
+		--enable-shared \
+		--with-system-expat \
+		--with-system-ffi \
+		--without-ensurepip \
+	&& make -j "$(nproc)" \
+	&& make install \
+	&& ldconfig \
+	\
+	&& find /usr/local -depth \
+		\( \
+			\( -type d -a \( -name test -o -name tests -o -name idle_test \) \) \
+			-o \
+			\( -type f -a \( -name '*.pyc' -o -name '*.pyo' \) \) \
+		\) -exec rm -rf '{}' + \
+	&& rm -rf /usr/src/python \
+	\
+	&& python3 --version
+
+# make some u
+RUN cd /usr/local/bin \
+	&& ln -s idle3 idle \
+	&& ln -s pydoc3 pydoc \
+	&& ln -s python3 python \
+	&& ln -s python3-config python-config
+
+# if this is called "PIP_VERSION", pip explodes with "ValueError: invalid truth value '<VERSION>'"
+ENV PYTHON_PIP_VERSION 20.0.2
+# https://github.com/pypa/get-pip
+ENV PYTHON_GET_PIP_URL https://github.com/pypa/get-pip/raw/d59197a3c169cef378a22428a3fa99d33e080a5d/get-pip.py
+ENV PYTHON_GET_PIP_SHA256 421ac1d44c0cf9730a088e337867d974b91bdce4ea2636099275071878cc189e
+
+RUN set -ex; \
+	\
+	wget -O get-pip.py "$PYTHON_GET_PIP_URL"; \
+	echo "$PYTHON_GET_PIP_SHA256 *get-pip.py" | sha256sum --check --strict -; \
+	\
+	python get-pip.py \
+		--disable-pip-version-check \
+		--no-cache-dir \
+		"pip==$PYTHON_PIP_VERSION" \
+	; \
+	pip --version; \
+	\
+	find /usr/local -depth \
+		\( \
+			\( -type d -a \( -name test -o -name tests -o -name idle_test \) \) \
+			-o \
+			\( -type f -a \( -name '*.pyc' -o -name '*.pyo' \) \) \
+		\) -exec rm -rf '{}' +; \
+	rm -f  get-pip.py
+###############################################################
+###############################################################
 
 RUN python3 -m pip install --upgrade pip \
     && python3 -m pip install notebook \
+	&& python3 -m pip install --upgrade cython \
     jupyterlab \
     plotly \
     numpy \
